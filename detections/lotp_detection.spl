@@ -1,0 +1,37 @@
+﻿# LOTP - Living off the Process Detection Suite
+# MITRE ATT&CK: T1055 - Process Injection
+# Author: Suraj Deshmukh
+# Date: 2026-04-18
+
+# Detection 1: Self Process Injection with High Access Rights
+index=dabba_windows EventCode=10
+| where SourceImage=TargetImage
+| where GrantedAccess="0x1F3FFF" OR GrantedAccess="0x1F0FFF"
+| table _time SourceImage TargetImage GrantedAccess CallTrace
+
+# Detection 2: ROP Chain Kernel Addresses in CallTrace
+index=dabba_windows EventCode=10
+| where like(CallTrace, "%UNKNOWN(FFFFF8%")
+| where GrantedAccess="0x1F3FFF" OR GrantedAccess="0x1F0FFF"
+| table _time SourceImage TargetImage GrantedAccess CallTrace
+
+# Detection 3: Shellcode Execution - Suspicious Process Spawned
+index=dabba_windows EventCode=1
+| where like(Image, "%calc%")
+| where NOT like(ParentImage, "%explorer%")
+| table _time Image ParentImage CommandLine
+
+# Detection 4: Combined LOTP Detection Rule
+index=dabba_windows earliest=-24h
+| eval detection=case(
+    EventCode="10" AND SourceImage=TargetImage AND (GrantedAccess="0x1F3FFF" OR GrantedAccess="0x1F0FFF"),
+    "LOTP - Self Process Injection Attempt",
+    EventCode="10" AND like(CallTrace, "%UNKNOWN(FFFFF8%"),
+    "LOTP - ROP Chain Kernel Addresses in CallTrace",
+    EventCode="1" AND like(Image, "%calc%") AND like(ParentImage, "%Discord%"),
+    "LOTP - Shellcode Execution - Calc Spawned from Discord",
+    true(), null()
+)
+| where isnotnull(detection)
+| table _time EventCode detection SourceImage TargetImage GrantedAccess CallTrace
+| sort - _time
